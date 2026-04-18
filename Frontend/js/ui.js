@@ -133,7 +133,10 @@ function generateCurves() {
       new THREE.Vector3(x2, y2, 0)
     ], false, 'catmullrom', 0.5);
 
-    // Store by unique ID (from_to) or index
+    // Pre-calculate 100 points for ultra-fast and consistent rendering
+    curve.points100 = curve.getPoints(100);
+
+    // Store by unique ID (from_to)
     edgeCurves.set(`${edge.from}_${edge.to}`, curve);
   });
 }
@@ -446,9 +449,9 @@ function drawGrid(w, h) {
 function drawEdges(w, h) {
   cityEdges.forEach((edge) => {
     const curve = edgeCurves.get(`${edge.from}_${edge.to}`);
-    if (!curve) return;
+    if (!curve || !curve.points100) return;
 
-    const points = curve.getPoints(100); // 100 segments for ultra-smoothness
+    const points = curve.points100;
     const t = edge.traffic || 0.3;
     let r, g, b;
     if (t < 0.5) {
@@ -494,40 +497,57 @@ function drawPath(w, h) {
 
   for (let i = 0; i < totalSegments; i++) {
     if (i > animSeg) break;
+
     const fromId = currentPath[i];
     const toId = currentPath[i + 1];
     
-    // Attempt bidirectional lookup
+    // Bidirectional lookup
     let curve = edgeCurves.get(`${fromId}_${toId}`) || edgeCurves.get(`${toId}_${fromId}`);
-    if (!curve) continue;
+    if (!curve || !curve.points100) continue;
 
-    const points = curve.getPoints(100);
-    const segProgress = Math.min(1, animSeg - i);
-    const visibleCount = Math.floor(points.length * segProgress);
-    if (visibleCount < 2) continue;
+    const isReverse = !edgeCurves.has(`${fromId}_${toId}`);
+    const segT = Math.min(1, animSeg - i);
+    const points = curve.points100;
 
-    const visiblePoints = points.slice(0, visibleCount);
+    mapCtx.lineCap = 'round';
+    mapCtx.lineJoin = 'round';
 
-    // Wide outer glow
-    mapCtx.beginPath();
-    mapCtx.moveTo(visiblePoints[0].x, visiblePoints[0].y);
-    visiblePoints.forEach(p => mapCtx.lineTo(p.x, p.y));
-    mapCtx.strokeStyle = glowColor + '0.06)';
-    mapCtx.lineWidth = 22; mapCtx.lineCap = 'round'; mapCtx.stroke();
+    // Draw the path using the curve's exact points
+    const drawCurvePath = (glow, width) => {
+      mapCtx.beginPath();
+      const startP = isReverse ? points[points.length - 1] : points[0];
+      mapCtx.moveTo(startP.x, startP.y);
 
-    // Mid glow
-    mapCtx.beginPath();
-    mapCtx.moveTo(visiblePoints[0].x, visiblePoints[0].y);
-    visiblePoints.forEach(p => mapCtx.lineTo(p.x, p.y));
-    mapCtx.strokeStyle = glowColor + '0.2)';
-    mapCtx.lineWidth = 8; mapCtx.lineCap = 'round'; mapCtx.stroke();
+      if (segT >= 1) {
+        // Full segment
+        if (isReverse) {
+          for (let j = points.length - 2; j >= 0; j--) mapCtx.lineTo(points[j].x, points[j].y);
+        } else {
+          for (let j = 1; j < points.length; j++) mapCtx.lineTo(points[j].x, points[j].y);
+        }
+      } else {
+        // Partial segment — use exact parameter interpolation for terminal vertex
+        const endP = curve.getPoint(isReverse ? (1 - segT) : segT);
+        const segmentSplit = Math.floor((points.length - 1) * segT);
+        
+        if (isReverse) {
+          for (let j = 1; j <= segmentSplit; j++) {
+            const idx = points.length - 1 - j;
+            mapCtx.lineTo(points[idx].x, points[idx].y);
+          }
+        } else {
+          for (let j = 1; j <= segmentSplit; j++) mapCtx.lineTo(points[j].x, points[j].y);
+        }
+        mapCtx.lineTo(endP.x, endP.y);
+      }
+      mapCtx.strokeStyle = glow;
+      mapCtx.lineWidth = width;
+      mapCtx.stroke();
+    };
 
-    // Core line (thicker)
-    mapCtx.beginPath();
-    mapCtx.moveTo(visiblePoints[0].x, visiblePoints[0].y);
-    visiblePoints.forEach(p => mapCtx.lineTo(p.x, p.y));
-    mapCtx.strokeStyle = pathColor;
-    mapCtx.lineWidth = 3; mapCtx.lineCap = 'round'; mapCtx.stroke();
+    drawCurvePath(glowColor + '0.06)', 22);
+    drawCurvePath(glowColor + '0.2)', 8);
+    drawCurvePath(pathColor, 3);
   }
 }
 
@@ -559,30 +579,36 @@ function drawRouteFlow(w, h) {
     if (!curve) return;
 
     // Correct direction if curve was stored backwards
-    const realSegT = edgeCurves.has(`${fromId}_${toId}`) ? segT : (1 - segT);
+    const isReverse = !edgeCurves.has(`${fromId}_${toId}`);
+    const realSegT = isReverse ? (1 - segT) : segT;
+    
     const p = curve.getPoint(realSegT);
     const tangent = curve.getTangent(realSegT);
 
-    // Tail glow (directional stretch)
+    // Dynamic scale for "glow"
+    const pulse = 1 + Math.sin(performance.now() * 0.01 + fp.progress * 10) * 0.1;
+
     mapCtx.save();
     mapCtx.translate(p.x, p.y);
-    mapCtx.rotate(Math.atan2(tangent.y, tangent.x));
     
-    // Glow trail
+    // Rotate to match curve tangent (pointing forward)
+    let angle = Math.atan2(tangent.y, tangent.x);
+    if (isReverse) angle += Math.PI; // flip tangent if reversed
+    mapCtx.rotate(angle);
+    
+    // Comet Tail (glow trail)
+    const gradient = mapCtx.createLinearGradient(-fp.size * 6, 0, 0, 0);
+    gradient.addColorStop(0, glowColor + '0)');
+    gradient.addColorStop(1, glowColor + (fp.opacity * 0.4 * pulse).toFixed(3) + ')');
+    
     mapCtx.beginPath();
-    mapCtx.ellipse(-fp.size * 2, 0, fp.size * 5, fp.size * 2, 0, 0, Math.PI * 2);
-    mapCtx.fillStyle = glowColor + (fp.opacity * 0.1).toFixed(3) + ')';
+    mapCtx.fillStyle = gradient;
+    mapCtx.roundRect(-fp.size * 8 * pulse, -fp.size * 0.8, fp.size * 8 * pulse, fp.size * 1.6, fp.size);
     mapCtx.fill();
 
-    // Mid dot
+    // Core Particle
     mapCtx.beginPath();
-    mapCtx.arc(0, 0, fp.size * 1.5, 0, Math.PI * 2);
-    mapCtx.fillStyle = glowColor + (fp.opacity * 0.3).toFixed(3) + ')';
-    mapCtx.fill();
-
-    // Core dot
-    mapCtx.beginPath();
-    mapCtx.arc(0, 0, fp.size, 0, Math.PI * 2);
+    mapCtx.arc(0, 0, fp.size * pulse, 0, Math.PI * 2);
     mapCtx.fillStyle = dotColor;
     mapCtx.shadowColor = dotColor;
     mapCtx.shadowBlur = 15;
@@ -604,12 +630,15 @@ function drawTrafficParticles(w, h) {
       tp.progress = Math.max(0, Math.min(1, tp.progress));
     }
 
-    const from = cityNodes.find((n) => n.id === tp.edge.from);
-    const to = cityNodes.find((n) => n.id === tp.edge.to);
-    if (!from || !to) return;
+    const fromId = tp.edge.from;
+    const toId = tp.edge.to;
+    const curve = edgeCurves.get(`${fromId}_${toId}`);
+    if (!curve) return;
 
-    const x = nodeX(from, w) + (nodeX(to, w) - nodeX(from, w)) * tp.progress;
-    const y = nodeY(from, h) + (nodeY(to, h) - nodeY(from, h)) * tp.progress;
+    // Correct direction interpolation along the curve
+    const p = curve.getPoint(tp.progress);
+    const x = p.x;
+    const y = p.y;
 
     const t = tp.edge.traffic || 0.3;
     const color = t > 0.65

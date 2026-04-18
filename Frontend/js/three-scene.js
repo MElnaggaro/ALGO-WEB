@@ -248,6 +248,23 @@ function setupRoad() {
 // ── Model Loading ─────────────────────────────
 function loadModel() {
   const loader = new GLTFLoader();
+  let loadFinished = false;
+
+  // Safety timeout: if it takes more than 15s, force "Ready" state
+  const safetyTimeout = setTimeout(() => {
+    if (!loadFinished) {
+      console.warn('Loading taking too long, forcing ready state');
+      finishLoading();
+    }
+  }, 15000);
+
+  function finishLoading() {
+    if (loadFinished) return;
+    loadFinished = true;
+    clearTimeout(safetyTimeout);
+    isReady = true;
+    if (onLoadCallback) onLoadCallback();
+  }
 
   loader.load(
     'models/batmobile_jet_car_1989.glb',
@@ -279,18 +296,23 @@ function loadModel() {
       modelGroup.position.set(0, alive.baseY, 1.5);
       scene.add(modelGroup);
 
-      isReady = true;
-      if (onLoadCallback) onLoadCallback();
+      finishLoading();
     },
     (xhr) => {
-      if (xhr.lengthComputable && onProgressCallback) {
-        onProgressCallback(Math.round((xhr.loaded / xhr.total) * 100));
+      if (onProgressCallback) {
+        if (xhr.lengthComputable && xhr.total > 0) {
+          onProgressCallback(Math.round((xhr.loaded / xhr.total) * 100));
+        } else {
+          // Fallback progress if Content-Length is missing (common with GZIP)
+          // Just increment to 90% based on chunks
+          const fallbackProgress = Math.min(90, Math.round((xhr.loaded / 11000000) * 100));
+          onProgressCallback(fallbackProgress);
+        }
       }
     },
     (error) => {
       console.error('Error loading model:', error);
-      isReady = true;
-      if (onLoadCallback) onLoadCallback();
+      finishLoading();
     }
   );
 }

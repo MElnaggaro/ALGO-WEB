@@ -67,7 +67,7 @@ function updateLoading(pct) {
 }
 
 // ── Boot ──────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+function boot() {
   // Force to top immediately
   window.scrollTo(0, 0);
 
@@ -94,7 +94,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Init environment particles
   initEnvironment(particleCanvas);
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  boot();
+}
 
 // ── "SYSTEM READY" — wait for click ───────────
 function showReadyState() {
@@ -103,10 +109,14 @@ function showReadyState() {
   if (loadingPercent) gsap.to(loadingPercent, { opacity: 0, duration: 0.5 });
 
   if (loadingTapHint) {
+    loadingTapHint.style.display = 'flex';
     gsap.to(loadingTapHint, {
       opacity: 1, y: 0,
       duration: 0.8, delay: 0.5,
       ease: 'power3.out',
+      onComplete: () => {
+        loadingTapHint.style.animation = 'tap-pulse 2s ease-in-out infinite';
+      }
     });
   }
 
