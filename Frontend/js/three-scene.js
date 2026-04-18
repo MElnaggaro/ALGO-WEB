@@ -266,12 +266,6 @@ function loadModel() {
       const model = gltf.scene;
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
-      console.log('Model Bounds:', box.min.y, box.max.y);
-
-      // ALIGN BOTTOM TO GROUND:
-      // Subtract min.y to move the lowest point of the model to Y=0
-      model.position.y -= box.min.y;
-
       const scaleFactor = 2.2 / Math.max(size.x, size.y, size.z);
       model.scale.setScalar(scaleFactor);
 
@@ -289,9 +283,14 @@ function loadModel() {
       modelGroup.add(model);
       modelGroup.scale.setScalar(0.01);
 
-      // Base height: grounded (0.01 offset for sub-pixel safety)
-      // Since model.position.y was adjusted so its bottom is at 0
-      alive.baseY = 0.01; 
+      // ALIGN BOTTOM TO GROUND (STABLE)
+      // Recalculate box after scaling
+      const scaledBox = new THREE.Box3().setFromObject(modelGroup);
+      const minY = scaledBox.min.y;
+      const baseY = -minY + 0.01;
+      
+      modelGroup.userData.baseY = baseY;
+      alive.baseY = baseY;
       
       modelGroup.position.set(0, alive.baseY, 1.5);
       scene.add(modelGroup);
@@ -332,14 +331,21 @@ function animate() {
     const tilt = Math.sin(elapsed * alive.tiltSpeed + 0.7) * alive.tiltAmp;
 
     // Apply position: scroll base + alive offsets
+    // SECTION 1: FIX CAR GROUND LOCK
+    if (modelGroup.userData.baseY !== undefined) {
+      modelGroup.position.y = modelGroup.userData.baseY;
+    }
+    
+    // SECTION 2: OPTIONAL MOVEMENT (X-axis interaction is handled in mouse-effects)
     modelGroup.position.x = alive.baseX + sway;
-    modelGroup.position.y = alive.baseY + bob;
     modelGroup.position.z = alive.baseZ;
 
     // Apply rotation: scroll base + idle + tilt
     modelGroup.rotation.x = alive.baseRX;
     modelGroup.rotation.y = alive.baseRY + elapsed * alive.idleSpeed;
-    modelGroup.rotation.z = alive.baseRZ + tilt;
+    
+    // SECTION 4: MICRO REALISM
+    modelGroup.rotation.z = alive.baseRZ + tilt + Math.sin(elapsed * 1.5) * 0.01;
 
     // Apply scale
     const s = alive.baseScale;

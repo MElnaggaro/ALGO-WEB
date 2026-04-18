@@ -217,11 +217,23 @@ function setupCarIntro(group, tl) {
 // ── After Intro ───────────────────────────────
 function onIntroComplete() {
   const camera = getCamera();
+  const group = getModelGroup();
+  const alive = getAlive();
+
+  // SECTION 3: PREVENT POSITION BREAKING AFTER INTRO
+  if (group) {
+    gsap.killTweensOf(group.position);
+    gsap.killTweensOf(group.rotation);
+    
+    // Reset to stable baseY stored in userData
+    if (group.userData.baseY !== undefined) {
+      alive.baseY = group.userData.baseY;
+      group.position.y = group.userData.baseY;
+    }
+  }
 
   // Sync alive state to hero position
-  const alive = getAlive();
   alive.baseX = 0;
-  // alive.baseY is already set by loadModel dynamic logic
   alive.baseZ = 1.5;
   alive.baseScale = 1.6;
 

@@ -15,9 +15,10 @@ let camera = null;
 let enabled = true;
 let rafId = null;
 
-const mouse = { x: 0, y: 0 };
-const smooth = { x: 0, y: 0 };
+let mouseX = 0;
+let mouseY = 0;
 
+const smooth = { x: 0, y: 0 };
 const LERP = 0.04;
 const INTENSITY = { x: 0.25, y: 0.12 };
 
@@ -28,17 +29,17 @@ export function initMouseEffects(cam) {
 }
 
 function onMouseMove(e) {
-  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = (e.clientY / window.innerHeight) * 2 - 1;
+  mouseX = (e.clientX / window.innerWidth - 0.5);
+  mouseY = (e.clientY / window.innerHeight - 0.5);
 }
 
 function update() {
   rafId = requestAnimationFrame(update);
   if (!camera || !enabled) return;
 
-  // Smooth mouse
-  smooth.x += (mouse.x - smooth.x) * LERP;
-  smooth.y += (mouse.y - smooth.y) * LERP;
+  // Smooth mouse for camera (existing)
+  smooth.x += ((mouseX * 2) - smooth.x) * LERP;
+  smooth.y += ((mouseY * 2) - smooth.y) * LERP;
 
   // Read continuous scroll state and apply mouse offset
   const state = getScrollState();
@@ -55,7 +56,7 @@ function update() {
     state.lookZ || 0
   );
 
-  // Also sync alive base values from scroll state
+  // Sync alive base values from scroll state
   const alive = getAlive();
   alive.baseX = state.modelX;
   alive.baseY = state.modelY;
@@ -67,6 +68,12 @@ function update() {
   alive.floatAmp = state.floatAmp;
   alive.floatSpeed = state.floatSpeed;
   alive.idleSpeed = state.idle;
+
+  // SECTION 2: APPLY INTERACTION AS OFFSETS
+  // We apply these as additive offsets to the base values
+  alive.baseRY += (mouseX * 0.5 - (alive.baseRY - state.modelRY)) * 0.05;
+  alive.baseRX += (-mouseY * 0.2 - (alive.baseRX - state.modelRX)) * 0.05;
+  alive.baseX += (mouseX * 0.5 - (alive.baseX - state.modelX)) * 0.05;
 }
 
 export function setMouseEffectsEnabled(val) {
@@ -74,7 +81,7 @@ export function setMouseEffectsEnabled(val) {
 }
 
 export function setModelInteraction(val) {
-  // alive motion handles model interaction now
+  // interaction is handled via alive state accumulation in update()
 }
 
 export function destroyMouseEffects() {
