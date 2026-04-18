@@ -83,17 +83,25 @@ function boot() {
   // Try to preload audio
   initAudio();
 
-  // Init Three.js
-  initScene(canvasContainer, {
-    onProgress: (pct) => updateLoading(pct),
-    onLoad: () => {
-      updateLoading(100);
-      showReadyState();
-    },
-  });
+  // Init Three.js (Scene only, no model yet)
+  initScene(canvasContainer);
 
   // Init environment particles
   initEnvironment(particleCanvas);
+
+  // Perceived Performance: Fake loading bar (0 -> 100 in 1.5s)
+  startFakeLoading();
+}
+
+function startFakeLoading() {
+  let progress = { value: 0 };
+  gsap.to(progress, {
+    value: 100,
+    duration: 1.5,
+    ease: 'power1.inOut',
+    onUpdate: () => updateLoading(Math.round(progress.value)),
+    onComplete: () => showReadyState()
+  });
 }
 
 if (document.readyState === 'loading') {
@@ -128,7 +136,11 @@ function showReadyState() {
 // ── Cinematic Intro ───────────────────────────
 function startCinematicIntro() {
   const camera = getCamera();
-  const group = getModelGroup();
+  
+  // Lazy Load the model now
+  import('./three-scene.js').then(mod => {
+    mod.loadModel();
+  });
 
   // Start engine sound
   startEngineSound();
@@ -141,20 +153,30 @@ function startCinematicIntro() {
 
   document.body.classList.add('scanline-effect');
 
-  if (!group) {
-    onIntroComplete();
-    return;
-  }
-
+  // We rely on the tick in animate() or a listener to find the group
   // ── CINEMATIC TIMELINE ──
   const tl = gsap.timeline({
     delay: 0.6,
     onComplete: onIntroComplete,
   });
 
-  // Setup: car tiny, below, rotated
+  // Track when group becomes available
+  const checkInterval = setInterval(() => {
+    const group = getModelGroup();
+    if (group) {
+      clearInterval(checkInterval);
+      setupCarIntro(group, tl);
+    }
+  }, 100);
+}
+
+function setupCarIntro(group, tl) {
+  const camera = getCamera();
+  const alive = getAlive();
+
+  // Setup: car tiny, below road (now Y=0), rotated
   group.scale.setScalar(0.01);
-  group.position.set(0, -1.5, 5);
+  group.position.set(0, -1.0, 5); 
   group.rotation.set(0.3, -0.8, 0.05);
 
   // Camera starts far back
@@ -164,32 +186,32 @@ function startCinematicIntro() {
   tl.to(group.scale, {
     x: 1.6, y: 1.6, z: 1.6,
     duration: 2.8, ease: 'power3.out',
-  });
+  }, 0);
 
-  // 2. Position rises to correct height ON road
+  // 2. Position rises to its calculated grounded height
   tl.to(group.position, {
-    x: 0, y: 0.5, z: 1.5,
+    x: 0, y: alive.baseY, z: 1.5,
     duration: 2.8, ease: 'power3.out',
-  }, '<');
+  }, 0);
 
   // 3. Rotation settles
   tl.to(group.rotation, {
     x: 0, y: 0, z: 0,
     duration: 3.0, ease: 'power3.out',
-  }, '<');
+  }, 0);
 
   // 4. Camera zooms in
   tl.to(camera.position, {
     x: 0, y: 1.2, z: 6,
     duration: 2.8, ease: 'power3.out',
     onUpdate: () => camera.lookAt(0, 0.3, 0),
-  }, '<');
+  }, 0);
 
   // 5. Lights intensify
   const lights = getLights();
-  if (lights.rimBlue)      tl.from(lights.rimBlue, { intensity: 0, duration: 2.0, ease: 'power2.out' }, '<+0.5');
-  if (lights.accentPurple) tl.from(lights.accentPurple, { intensity: 0, duration: 2.0, ease: 'power2.out' }, '<');
-  if (lights.underGlow)    tl.from(lights.underGlow, { intensity: 0, duration: 1.5, ease: 'power2.out' }, '<+0.3');
+  if (lights.rimBlue)      tl.from(lights.rimBlue, { intensity: 0, duration: 2.0, ease: 'power2.out' }, 0.5);
+  if (lights.accentPurple) tl.from(lights.accentPurple, { intensity: 0, duration: 2.0, ease: 'power2.out' }, 0.5);
+  if (lights.underGlow)    tl.from(lights.underGlow, { intensity: 0, duration: 1.5, ease: 'power2.out' }, 0.8);
 }
 
 // ── After Intro ───────────────────────────────
@@ -199,7 +221,7 @@ function onIntroComplete() {
   // Sync alive state to hero position
   const alive = getAlive();
   alive.baseX = 0;
-  alive.baseY = 0.5;
+  // alive.baseY is already set by loadModel dynamic logic
   alive.baseZ = 1.5;
   alive.baseScale = 1.6;
 

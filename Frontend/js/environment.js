@@ -18,7 +18,7 @@ import {
 let canvas, ctx;
 let particles = [];
 let stars = [];
-let currentMode = 'night';
+let currentMode = 'morning';
 let isEmergency = false;
 let animId = null;
 let emergencyOverlay = null;

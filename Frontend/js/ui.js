@@ -61,7 +61,7 @@ let trafficParticles = [];
 let routeFlowParticles = [];
 let edgeCurves = new Map(); // Store THREE.CatmullRomCurve3 per edge
 let hoveredNode = null;
-let currentTimePeriod = 'night';
+let currentTimePeriod = 'morning';
 let currentTrafficMode = 'normal';
 
 // Padding for graph display

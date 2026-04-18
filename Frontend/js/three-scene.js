@@ -28,15 +28,15 @@ let shadowPlane = null;
 // ── Alive motion state (tweened via GSAP) ─────
 const alive = {
   idleSpeed: 0.002,
-  floatAmp: 0.06,
-  floatSpeed: 0.7,
+  floatAmp: 0.002,   // micro-suspension amplitude
+  floatSpeed: 2.0,   // micro-suspension frequency
   swayAmp: 0.15,     // left/right sway amplitude
   swaySpeed: 0.8,    // sway frequency
   tiltAmp: 0.03,     // z-rotation tilt
   tiltSpeed: 0.5,    // tilt frequency
   roadSpeed: 0.05,
   // These are accumulated by the scroll system
-  baseX: 0, baseY: 0.5, baseZ: 1.5,
+  baseX: 0, baseY: 0, baseZ: 1.5,
   baseRX: 0, baseRY: 0, baseRZ: 0,
   baseScale: 1.6,
 };
@@ -69,13 +69,12 @@ export function initScene(container, { onLoad, onProgress } = {}) {
     antialias: true,
     powerPreference: 'high-performance',
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.3));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.3;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = false; // Performance: disable shadows as requested
   renderer.domElement.id = 'three-canvas';
 
   container.appendChild(renderer.domElement);
@@ -83,7 +82,6 @@ export function initScene(container, { onLoad, onProgress } = {}) {
   setupLighting();
   setupRoad();
   setupStars();
-  loadModel();
 
   window.addEventListener('resize', onResize);
   animate();
@@ -96,8 +94,6 @@ function setupLighting() {
 
   lights.directional = new THREE.DirectionalLight(0xeeeeff, 1.0);
   lights.directional.position.set(5, 10, 5);
-  lights.directional.castShadow = true;
-  lights.directional.shadow.mapSize.set(512, 512);
   scene.add(lights.directional);
 
   lights.rimBlue = new THREE.PointLight(0x00c3ff, 4, 20);
@@ -108,7 +104,7 @@ function setupLighting() {
   lights.accentPurple.position.set(-4, 2.5, -1);
   scene.add(lights.accentPurple);
 
-  lights.underGlow = new THREE.PointLight(0x00c3ff, 2.5, 6);
+  lights.underGlow = new THREE.PointLight(0x00c3ff, 1.0, 6);
   lights.underGlow.position.set(0, -0.5, 0);
   scene.add(lights.underGlow);
 
@@ -152,7 +148,7 @@ function setupRoad() {
   roadGroup = new THREE.Group();
   scene.add(roadGroup);
 
-  const ROAD_Y = -0.81;
+  const ROAD_Y = 0; // RE-LEVELED Coordinate system
 
   // Main asphalt
   const roadGeo = new THREE.PlaneGeometry(6, 80);
@@ -163,7 +159,6 @@ function setupRoad() {
   const roadPlane = new THREE.Mesh(roadGeo, roadMat);
   roadPlane.rotation.x = -Math.PI / 2;
   roadPlane.position.set(0, ROAD_Y, 0);
-  roadPlane.receiveShadow = true;
   roadGroup.add(roadPlane);
 
   // Center dashed lines
@@ -231,7 +226,6 @@ function setupRoad() {
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = ROAD_Y - 0.01;
-  ground.receiveShadow = true;
   roadGroup.add(ground);
 
   // Shadow under car
@@ -239,10 +233,10 @@ function setupRoad() {
   const shadowMat = new THREE.MeshBasicMaterial({
     color: 0x000000, transparent: true, opacity: 0.3, side: THREE.DoubleSide,
   });
-  shadowPlane = new THREE.Mesh(shadowGeo, shadowMat);
-  shadowPlane.rotation.x = -Math.PI / 2;
-  shadowPlane.position.set(0, ROAD_Y + 0.03, 0);
-  scene.add(shadowPlane);
+  // shadowPlane = new THREE.Mesh(shadowGeo, shadowMat);
+  // shadowPlane.rotation.x = -Math.PI / 2;
+  // shadowPlane.position.set(0, ROAD_Y + 0.03, 0);
+  // scene.add(shadowPlane); (REMOVED: caused unrealistic dark halo)
 }
 
 // ── Model Loading ─────────────────────────────
@@ -271,19 +265,20 @@ function loadModel() {
     (gltf) => {
       const model = gltf.scene;
       const box = new THREE.Box3().setFromObject(model);
-      const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
+      console.log('Model Bounds:', box.min.y, box.max.y);
 
-      model.position.sub(center);
+      // ALIGN BOTTOM TO GROUND:
+      // Subtract min.y to move the lowest point of the model to Y=0
+      model.position.y -= box.min.y;
+
       const scaleFactor = 2.2 / Math.max(size.x, size.y, size.z);
       model.scale.setScalar(scaleFactor);
 
       model.traverse((child) => {
         if (child.isMesh) {
-          child.castShadow = false;
-          child.receiveShadow = false;
           if (child.material) {
-            child.material.envMapIntensity = 1.8;
+            child.material.envMapIntensity = 1.6;
             child.userData.origEmissive = child.material.emissive?.clone() || new THREE.Color(0);
             child.userData.origEmissiveIntensity = child.material.emissiveIntensity || 0;
           }
@@ -293,6 +288,11 @@ function loadModel() {
       modelGroup = new THREE.Group();
       modelGroup.add(model);
       modelGroup.scale.setScalar(0.01);
+
+      // Base height: grounded (0.01 offset for sub-pixel safety)
+      // Since model.position.y was adjusted so its bottom is at 0
+      alive.baseY = 0.01; 
+      
       modelGroup.position.set(0, alive.baseY, 1.5);
       scene.add(modelGroup);
 
@@ -346,7 +346,7 @@ function animate() {
     modelGroup.scale.set(s, s, s);
 
     // Under-glow breathing
-    lights.underGlow.intensity = 2.5 + Math.sin(elapsed * 1.5) * 0.8;
+    lights.underGlow.intensity = 1.0 + Math.sin(elapsed * 1.5) * 0.3;
     lights.underGlow.position.set(alive.baseX, -0.5, alive.baseZ);
 
     // Headlight flicker
@@ -399,6 +399,8 @@ export function getLights() { return lights; }
 export function getScene() { return scene; }
 export function getAlive() { return alive; }
 export function isSceneReady() { return isReady; }
+// Exposing for lazy loading
+export { loadModel };
 
 // ── Scroll system writes to alive state ───────
 export function setAliveMotion(sway, tilt) {
