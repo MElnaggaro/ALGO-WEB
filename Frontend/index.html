@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart City Transport — Cinematic Experience</title>
+  <meta name="description" content="An immersive cinematic smart city transportation system featuring real-time route optimization, 3D visualization, and interactive traffic simulation." />
+  <meta name="theme-color" content="#050505" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/style.css" />
+
+  <!-- Three.js Import Map -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <!-- GSAP -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+  <script>gsap.registerPlugin(ScrollTrigger);</script>
+</head>
+<body>
+
+  <!-- ============================================================
+       LOADING SCREEN
+       ============================================================ -->
+  <div id="loading-screen">
+    <div class="loading-title">Initializing System</div>
+    <div class="loading-bar-container">
+      <div class="loading-bar" id="loading-bar"></div>
+    </div>
+    <div class="loading-percent" id="loading-percent">0%</div>
+  </div>
+
+  <!-- ============================================================
+       BACKGROUND LAYERS
+       ============================================================ -->
+  <canvas id="particle-canvas"></canvas>
+  <div id="canvas-container"></div>
+  <div class="fog-overlay"></div>
+
+  <!-- ============================================================
+       INTRO SECTIONS
+       ============================================================ -->
+  <div class="intro-sections">
+
+    <!-- HERO -->
+    <section id="hero">
+      <div class="hero-badge fade-in-up">
+        <span class="dot"></span>
+        SYSTEM ONLINE
+      </div>
+      <h1 class="hero-title fade-in-up">Smart City<br/>Transport</h1>
+      <p class="hero-subtitle fade-in-up">
+        Next-generation urban mobility powered by intelligent routing,
+        real-time traffic analysis, and adaptive infrastructure.
+      </p>
+      <div class="scroll-indicator fade-in-up">
+        <span>Scroll to explore</span>
+        <div class="scroll-line"></div>
+      </div>
+    </section>
+
+    <!-- ABOUT -->
+    <section id="about">
+      <span class="section-label fade-in-up">The System</span>
+      <h2 class="section-title fade-in-up">Intelligent Traffic<br/>Optimization</h2>
+      <div class="about-grid stagger-in">
+        <div class="glass-card">
+          <div class="card-icon">🛰️</div>
+          <h3 class="card-title">Real-Time Analytics</h3>
+          <p class="card-text">Continuous monitoring of every road segment with sensor fusion, processing millions of data points per second for instant decision-making.</p>
+        </div>
+        <div class="glass-card">
+          <div class="card-icon">🧠</div>
+          <h3 class="card-title">Smart Routing</h3>
+          <p class="card-text">Advanced pathfinding algorithms calculate optimal routes considering traffic density, weather conditions, and predicted congestion patterns.</p>
+        </div>
+        <div class="glass-card">
+          <div class="card-icon">⚡</div>
+          <h3 class="card-title">Emergency Priority</h3>
+          <p class="card-text">Instant route clearance and signal override for emergency vehicles, reducing response times by up to 40% in critical situations.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TEAM -->
+    <section id="team">
+      <span class="section-label fade-in-up">The Team</span>
+      <h2 class="section-title fade-in-up">Built by Engineers<br/>Who Dream Big</h2>
+      <div class="team-grid stagger-in">
+        <div class="glass-card team-card">
+          <div class="team-avatar">🏗️</div>
+          <div class="team-name">Alex Mercer</div>
+          <div class="team-role">Lead Architect</div>
+        </div>
+        <div class="glass-card team-card">
+          <div class="team-avatar">🔬</div>
+          <div class="team-name">Sarah Chen</div>
+          <div class="team-role">AI Research Lead</div>
+        </div>
+        <div class="glass-card team-card">
+          <div class="team-avatar">🎨</div>
+          <div class="team-name">Marcus Rivera</div>
+          <div class="team-role">UX Director</div>
+        </div>
+        <div class="glass-card team-card">
+          <div class="team-avatar">⚙️</div>
+          <div class="team-name">Yuki Tanaka</div>
+          <div class="team-role">Systems Engineer</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section id="cta">
+      <h2 class="cta-title fade-in-up">Ready to<br/>Experience It?</h2>
+      <p class="cta-subtitle fade-in-up">
+        Step into the command center and take control of an entire city's transportation network.
+      </p>
+      <button class="btn-primary fade-in-up" id="start-simulation-btn">
+        <span>Start Simulation</span>
+      </button>
+    </section>
+  </div>
+
+  <!-- ============================================================
+       DASHBOARD
+       ============================================================ -->
+  <div id="dashboard">
+    <!-- Header -->
+    <header class="dash-header">
+      <div class="dash-logo">SCI:TRANSPORT</div>
+      <div class="dash-controls">
+        <div class="status-badge online">
+          <span class="badge-dot"></span>
+          LIVE
+        </div>
+        <div class="dash-time" id="dash-clock">00:00:00</div>
+        <div class="mode-toggle">
+          <button class="mode-btn active" data-mode="night">Night</button>
+          <button class="mode-btn" data-mode="day">Day</button>
+        </div>
+        <button class="btn-secondary" id="back-to-intro-btn">
+          ← Back
+        </button>
+      </div>
+    </header>
+
+    <!-- Body -->
+    <div class="dash-body">
+
+      <!-- INPUT PANEL -->
+      <div class="dash-panel" id="input-panel">
+        <div class="panel-title">Route Configuration</div>
+
+        <div class="form-group">
+          <label class="form-label" for="source-select">Origin</label>
+          <select class="form-select" id="source-select">
+            <option value="" disabled selected>Select origin</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="dest-select">Destination</label>
+          <select class="form-select" id="dest-select">
+            <option value="" disabled selected>Select destination</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="time-select">Time Period</label>
+          <select class="form-select" id="time-select">
+            <option value="morning">Morning</option>
+            <option value="afternoon">Afternoon</option>
+            <option value="night" selected>Night</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="mode-select">Mode</label>
+          <select class="form-select" id="mode-select">
+            <option value="normal">Normal</option>
+            <option value="emergency">Emergency</option>
+          </select>
+        </div>
+
+        <button class="btn-primary" id="calc-route-btn" style="width:100%; margin-top: 12px;">
+          <span>Calculate Route</span>
+        </button>
+      </div>
+
+      <!-- MAP VIEW -->
+      <div class="map-container">
+        <canvas id="map-canvas"></canvas>
+      </div>
+
+      <!-- OUTPUT PANEL -->
+      <div class="dash-panel" id="output-panel">
+        <div class="panel-title">Route Analysis</div>
+
+        <div class="stat-card">
+          <div class="stat-label">Estimated Time</div>
+          <div class="stat-value" id="stat-eta">-- min</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-label">Distance</div>
+          <div class="stat-value success" id="stat-distance">-- km</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-label">Intermediate Stops</div>
+          <div class="stat-value" id="stat-stops">--</div>
+        </div>
+
+        <div class="stat-card" id="stat-traffic">
+          <div class="stat-label">Traffic Level</div>
+          <div class="traffic-label" style="font-size:0.8rem; color: var(--text-secondary); margin-bottom: 6px;">--</div>
+          <div class="traffic-bar-container">
+            <div class="traffic-bar traffic-low" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <div id="mode-badge" style="margin-top: 16px; font-family: var(--font-heading); font-size: 0.7rem; letter-spacing: 2px; color: var(--primary);"></div>
+
+        <div class="panel-title" style="margin-top: 24px;">Route Steps</div>
+        <div id="route-steps"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MAIN SCRIPT
+       ============================================================ -->
+  <script type="module" src="js/main.js"></script>
+
+</body>
+</html>
