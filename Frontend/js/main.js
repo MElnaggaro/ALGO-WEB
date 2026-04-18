@@ -1,15 +1,20 @@
 /**
  * main.js
  * ─────────────────────────────────────────────
- * Entry point — orchestrates all modules with
- * cinematic boot sequence and smooth transitions.
+ * Entry point — cinematic boot sequence:
+ * 1. Force scroll to top
+ * 2. Load model (progress bar)
+ * 3. Show "SYSTEM READY — TAP TO INITIALIZE"
+ * 4. On click: fade out, play engine sound, cinematic intro
+ * 5. Enable continuous scroll + mouse effects
  */
 
 import {
-  initScene, getCamera, getModelGroup, getLights, getScene,
-  setIdleRotation, setModelScale, setModelPosition,
+  initScene, getCamera, getModelGroup, getLights, getAlive,
 } from './three-scene.js';
-import { initScrollSystem, destroyScrollSystem } from './scroll-system.js';
+import {
+  initScrollSystem, destroyScrollSystem, playIntroAnimations,
+} from './scroll-system.js';
 import {
   initMouseEffects,
   setMouseEffectsEnabled,
@@ -18,74 +23,196 @@ import {
 import { initEnvironment } from './environment.js';
 import { transitionToDashboard, transitionToIntro } from './ui.js';
 
-// ── Loading ───────────────────────────────────
+// ── Force scroll to top on every load/refresh ──
+window.addEventListener('beforeunload', () => {
+  window.scrollTo(0, 0);
+});
+history.scrollRestoration = 'manual';
+
+// ── DOM References ────────────────────────────
 const loadingScreen = document.getElementById('loading-screen');
 const loadingBar = document.getElementById('loading-bar');
 const loadingPercent = document.getElementById('loading-percent');
+const loadingTitle = document.querySelector('.loading-title');
+const loadingTapHint = document.getElementById('loading-tap-hint');
+const introSections = document.querySelector('.intro-sections');
 
+// ── Audio ─────────────────────────────────────
+let engineAudio = null;
+let audioPlayed = false;
+
+function initAudio() {
+  engineAudio = new Audio('audio/engine.mp3');
+  engineAudio.loop = false;    // Play once — cinematic moment
+  engineAudio.volume = 0;
+  engineAudio.preload = 'auto';
+}
+
+function startEngineSound() {
+  if (!engineAudio || audioPlayed) return;
+  audioPlayed = true;
+  engineAudio.play().then(() => {
+    // Fade in to 0.3, then fade out after 8s
+    gsap.to(engineAudio, { volume: 0.3, duration: 2, ease: 'power2.out' });
+    gsap.to(engineAudio, { volume: 0, duration: 3, delay: 8, ease: 'power2.in' });
+  }).catch(() => {
+    // Audio blocked or file missing — silently continue
+  });
+}
+
+// ── Loading ───────────────────────────────────
 function updateLoading(pct) {
   if (loadingBar) loadingBar.style.width = pct + '%';
   if (loadingPercent) loadingPercent.textContent = pct + '%';
 }
 
-function hideLoading() {
-  // Dramatic delay before reveal
-  setTimeout(() => {
-    if (loadingScreen) {
-      gsap.to(loadingScreen, {
-        opacity: 0,
-        duration: 0.8,
-        ease: 'power2.inOut',
-        onComplete: () => {
-          loadingScreen.classList.add('hidden');
-        },
-      });
-    }
-  }, 600);
-}
-
 // ── Boot ──────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // Force to top immediately
+  window.scrollTo(0, 0);
+
   const canvasContainer = document.getElementById('canvas-container');
   const particleCanvas = document.getElementById('particle-canvas');
 
-  // Init Three.js scene
+  // Hide intro until after cinematic
+  if (introSections) {
+    introSections.style.opacity = '0';
+    introSections.style.pointerEvents = 'none';
+  }
+
+  // Try to preload audio
+  initAudio();
+
+  // Init Three.js
   initScene(canvasContainer, {
     onProgress: (pct) => updateLoading(pct),
     onLoad: () => {
       updateLoading(100);
-      hideLoading();
-      // Small delay to let loading fade out before starting animations
-      setTimeout(onSceneReady, 1000);
+      showReadyState();
     },
   });
 
   // Init environment particles
   initEnvironment(particleCanvas);
-
-  // Scanline effect
-  document.body.classList.add('scanline-effect');
 });
 
-// ── Scene Ready ───────────────────────────────
-function onSceneReady() {
+// ── "SYSTEM READY" — wait for click ───────────
+function showReadyState() {
+  if (loadingTitle) loadingTitle.textContent = 'SYSTEM READY';
+  if (loadingBar) gsap.to(loadingBar.parentElement, { opacity: 0, duration: 0.5 });
+  if (loadingPercent) gsap.to(loadingPercent, { opacity: 0, duration: 0.5 });
+
+  if (loadingTapHint) {
+    gsap.to(loadingTapHint, {
+      opacity: 1, y: 0,
+      duration: 0.8, delay: 0.5,
+      ease: 'power3.out',
+    });
+  }
+
+  loadingScreen.style.cursor = 'pointer';
+  loadingScreen.addEventListener('click', startCinematicIntro, { once: true });
+  loadingScreen.addEventListener('touchstart', startCinematicIntro, { once: true });
+}
+
+// ── Cinematic Intro ───────────────────────────
+function startCinematicIntro() {
+  const camera = getCamera();
+  const group = getModelGroup();
+
+  // Start engine sound
+  startEngineSound();
+
+  // Fade out loading screen
+  gsap.to(loadingScreen, {
+    opacity: 0, duration: 1.0, ease: 'power2.inOut',
+    onComplete: () => loadingScreen.classList.add('hidden'),
+  });
+
+  document.body.classList.add('scanline-effect');
+
+  if (!group) {
+    onIntroComplete();
+    return;
+  }
+
+  // ── CINEMATIC TIMELINE ──
+  const tl = gsap.timeline({
+    delay: 0.6,
+    onComplete: onIntroComplete,
+  });
+
+  // Setup: car tiny, below, rotated
+  group.scale.setScalar(0.01);
+  group.position.set(0, -1.5, 5);
+  group.rotation.set(0.3, -0.8, 0.05);
+
+  // Camera starts far back
+  camera.position.set(0, 2.5, 10);
+
+  // 1. Scale up — car materializes
+  tl.to(group.scale, {
+    x: 1.6, y: 1.6, z: 1.6,
+    duration: 2.8, ease: 'power3.out',
+  });
+
+  // 2. Position rises to correct height ON road
+  tl.to(group.position, {
+    x: 0, y: 0.5, z: 1.5,
+    duration: 2.8, ease: 'power3.out',
+  }, '<');
+
+  // 3. Rotation settles
+  tl.to(group.rotation, {
+    x: 0, y: 0, z: 0,
+    duration: 3.0, ease: 'power3.out',
+  }, '<');
+
+  // 4. Camera zooms in
+  tl.to(camera.position, {
+    x: 0, y: 1.2, z: 6,
+    duration: 2.8, ease: 'power3.out',
+    onUpdate: () => camera.lookAt(0, 0.3, 0),
+  }, '<');
+
+  // 5. Lights intensify
+  const lights = getLights();
+  if (lights.rimBlue)      tl.from(lights.rimBlue, { intensity: 0, duration: 2.0, ease: 'power2.out' }, '<+0.5');
+  if (lights.accentPurple) tl.from(lights.accentPurple, { intensity: 0, duration: 2.0, ease: 'power2.out' }, '<');
+  if (lights.underGlow)    tl.from(lights.underGlow, { intensity: 0, duration: 1.5, ease: 'power2.out' }, '<+0.3');
+}
+
+// ── After Intro ───────────────────────────────
+function onIntroComplete() {
   const camera = getCamera();
 
-  // Init scroll-driven camera transitions
+  // Sync alive state to hero position
+  const alive = getAlive();
+  alive.baseX = 0;
+  alive.baseY = 0.5;
+  alive.baseZ = 1.5;
+  alive.baseScale = 1.6;
+
+  // Show intro sections
+  if (introSections) {
+    introSections.style.pointerEvents = 'auto';
+    gsap.to(introSections, { opacity: 1, duration: 0.8, ease: 'power3.out' });
+  }
+
+  // Init continuous scroll system
   initScrollSystem(camera);
 
-  // Init mouse parallax + model interaction
+  // Play hero text animations
+  playIntroAnimations();
+
+  // Init mouse effects (bridges scroll → scene)
   initMouseEffects(camera);
 
-  // Cinematic entrance — model glides into position
-  cinematicEntrance();
-
-  // Bind CTA button
+  // Bind CTA
   const startBtn = document.getElementById('start-simulation-btn');
   if (startBtn) {
     startBtn.addEventListener('click', () => {
       setMouseEffectsEnabled(false);
-      setModelInteraction(false);
       destroyScrollSystem();
       transitionToDashboard();
     });
@@ -97,11 +224,12 @@ function onSceneReady() {
     backBtn.addEventListener('click', () => {
       transitionToIntro();
       setMouseEffectsEnabled(true);
-      setModelInteraction(true);
+
+      // Scroll back to top
+      window.scrollTo({ top: 0, behavior: 'instant' });
 
       setTimeout(() => {
-        const cam = getCamera();
-        initScrollSystem(cam);
+        initScrollSystem(getCamera());
       }, 900);
     });
   }
@@ -111,48 +239,12 @@ function onSceneReady() {
   setInterval(updateClock, 1000);
 }
 
-// ── Cinematic Entrance ────────────────────────
-function cinematicEntrance() {
-  const group = getModelGroup();
-  if (!group) return;
-
-  // Start invisible and slightly offset
-  group.scale.setScalar(0.01);
-  group.position.set(0, -1, 5);
-  group.rotation.set(0.2, -0.5, 0);
-
-  // Dramatic zoom-in entrance
-  const tl = gsap.timeline({ delay: 0.2 });
-
-  // Scale up dramatically
-  tl.to(group.scale, {
-    x: 1.8, y: 1.8, z: 1.8,
-    duration: 2.0,
-    ease: 'power3.out',
-  });
-
-  // Position into hero state
-  tl.to(group.position, {
-    x: 0, y: 0, z: 1.5,
-    duration: 2.0,
-    ease: 'power3.out',
-  }, '<');
-
-  // Rotation settle
-  tl.to(group.rotation, {
-    x: 0, y: 0, z: 0,
-    duration: 2.2,
-    ease: 'power3.out',
-  }, '<');
-}
-
-// ── Clock ─────────────────────────────────────
 function updateClock() {
   const el = document.getElementById('dash-clock');
   if (!el) return;
   const now = new Date();
-  const h = String(now.getHours()).padStart(2, '0');
-  const m = String(now.getMinutes()).padStart(2, '0');
-  const s = String(now.getSeconds()).padStart(2, '0');
-  el.textContent = `${h}:${m}:${s}`;
+  el.textContent =
+    String(now.getHours()).padStart(2, '0') + ':' +
+    String(now.getMinutes()).padStart(2, '0') + ':' +
+    String(now.getSeconds()).padStart(2, '0');
 }

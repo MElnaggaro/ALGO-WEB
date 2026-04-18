@@ -1,99 +1,82 @@
 /**
  * mouse-effects.js
  * ─────────────────────────────────────────────
- * Cinematic parallax: mouse controls BOTH
- * camera offset AND model rotation for
- * an interactive hero experience.
+ * Smooth camera parallax via LERP.
  *
- * Uses lerp (0.03) — never direct set.
+ * The scroll system writes baseCameraPos/LookAt
+ * continuously. This module reads those and
+ * applies mouse offset — never fights scroll.
  */
 
-import { baseCameraPos, baseCameraLookAt } from './scroll-system.js';
-import { getModelGroup } from './three-scene.js';
+import { baseCameraPos, baseCameraLookAt, getScrollState } from './scroll-system.js';
+import { getCamera, getAlive } from './three-scene.js';
 
 let camera = null;
 let enabled = true;
 let rafId = null;
-let modelInteraction = true; // car rotates with mouse in hero
 
-// Mouse state
 const mouse = { x: 0, y: 0 };
 const smooth = { x: 0, y: 0 };
 
-// Model rotation target (from mouse)
-const modelMouseRot = { x: 0, y: 0 };
-const modelMouseSmooth = { x: 0, y: 0 };
+const LERP = 0.04;
+const INTENSITY = { x: 0.25, y: 0.12 };
 
-// Config
-const LERP = 0.03;
-const CAMERA_INTENSITY = { x: 0.35, y: 0.2 };
-const MODEL_ROT_INTENSITY = { x: 0.08, y: 0.15 };
-
-// ── Init ──────────────────────────────────────
 export function initMouseEffects(cam) {
   camera = cam;
   window.addEventListener('mousemove', onMouseMove, { passive: true });
   update();
 }
 
-// ── Mouse Handler ─────────────────────────────
 function onMouseMove(e) {
   mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
   mouse.y = (e.clientY / window.innerHeight) * 2 - 1;
 }
 
-// ── Update Loop — LERP interpolation ──────────
 function update() {
   rafId = requestAnimationFrame(update);
-
   if (!camera || !enabled) return;
 
-  // Smooth interpolation (lerp)
+  // Smooth mouse
   smooth.x += (mouse.x - smooth.x) * LERP;
   smooth.y += (mouse.y - smooth.y) * LERP;
 
-  // Camera offset — additive on scroll position
-  camera.position.x = baseCameraPos.x + smooth.x * CAMERA_INTENSITY.x;
-  camera.position.y = baseCameraPos.y - smooth.y * CAMERA_INTENSITY.y;
-  // Keep z from scroll system
-  camera.position.z = baseCameraPos.z;
+  // Read continuous scroll state and apply mouse offset
+  const state = getScrollState();
+  const offsetX = smooth.x * INTENSITY.x;
+  const offsetY = -smooth.y * INTENSITY.y;
 
-  // Look at with slight offset for parallax depth
+  camera.position.x = state.camX + offsetX;
+  camera.position.y = state.camY + offsetY;
+  camera.position.z = state.camZ;
+
   camera.lookAt(
-    baseCameraLookAt.x + smooth.x * 0.1,
-    baseCameraLookAt.y - smooth.y * 0.05,
-    baseCameraLookAt.z
+    state.lookX + smooth.x * 0.06,
+    state.lookY - smooth.y * 0.03,
+    state.lookZ || 0
   );
 
-  // Model rotation from mouse (hero interactive feel)
-  if (modelInteraction) {
-    const group = getModelGroup();
-    if (group) {
-      modelMouseRot.x = -mouse.y * MODEL_ROT_INTENSITY.x;
-      modelMouseRot.y = mouse.x * MODEL_ROT_INTENSITY.y;
-
-      modelMouseSmooth.x += (modelMouseRot.x - modelMouseSmooth.x) * LERP;
-      modelMouseSmooth.y += (modelMouseRot.y - modelMouseSmooth.y) * LERP;
-
-      // Add mouse rotation on top of idle (additive)
-      // The idle rotation in animate() already handles base rotation
-      // We add a small delta here
-      group.rotation.x += (modelMouseSmooth.x - group.rotation.x) * 0.01;
-      // Don't override y since idle rotation adds to it
-    }
-  }
+  // Also sync alive base values from scroll state
+  const alive = getAlive();
+  alive.baseX = state.modelX;
+  alive.baseY = state.modelY;
+  alive.baseZ = state.modelZ;
+  alive.baseRX = state.modelRX;
+  alive.baseRY = state.modelRY;
+  alive.baseRZ = state.modelRZ;
+  alive.baseScale = state.modelScale;
+  alive.floatAmp = state.floatAmp;
+  alive.floatSpeed = state.floatSpeed;
+  alive.idleSpeed = state.idle;
 }
 
-// ── Enable/Disable ────────────────────────────
-export function setMouseEffectsEnabled(state) {
-  enabled = state;
+export function setMouseEffectsEnabled(val) {
+  enabled = val;
 }
 
-export function setModelInteraction(state) {
-  modelInteraction = state;
+export function setModelInteraction(val) {
+  // alive motion handles model interaction now
 }
 
-// ── Cleanup ───────────────────────────────────
 export function destroyMouseEffects() {
   window.removeEventListener('mousemove', onMouseMove);
   cancelAnimationFrame(rafId);

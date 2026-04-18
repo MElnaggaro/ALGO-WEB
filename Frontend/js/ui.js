@@ -1,33 +1,33 @@
 /**
  * ui.js
  * ─────────────────────────────────────────────
- * Dashboard: Egyptian city graph with real neighborhoods,
- * Dijkstra pathfinding, emergency mode integration,
- * traffic-aware visualization, animated route rendering.
+ * Dashboard: Egyptian city graph with IMPROVED
+ * visualization — larger nodes, bezier curves,
+ * proper normalization, bigger labels, halos.
  */
 
+import * as THREE from 'three';
 import { setMode, setEmergencyMode } from './environment.js';
 import { setRoadState } from './three-scene.js';
 
 // ══════════════════════════════════════════════
-// EGYPTIAN CITY GRAPH — real neighborhoods
+// EGYPTIAN CITY GRAPH — better-spaced coordinates
 // ══════════════════════════════════════════════
 const cityNodes = [
-  { id: 'maadi',         label: 'Maadi',          x: 0.28, y: 0.72 },
-  { id: 'nasr_city',     label: 'Nasr City',      x: 0.68, y: 0.30 },
-  { id: 'heliopolis',    label: 'Heliopolis',      x: 0.78, y: 0.18 },
-  { id: 'downtown',      label: 'Downtown',        x: 0.42, y: 0.42 },
-  { id: 'giza',          label: 'Giza',            x: 0.15, y: 0.38 },
-  { id: 'zamalek',       label: 'Zamalek',         x: 0.35, y: 0.30 },
-  { id: 'mohandessin',   label: 'Mohandessin',     x: 0.22, y: 0.25 },
-  { id: 'dokki',         label: 'Dokki',           x: 0.18, y: 0.48 },
-  { id: 'new_cairo',     label: 'New Cairo',       x: 0.88, y: 0.45 },
+  { id: 'maadi',         label: 'Maadi',          x: 0.35, y: 0.82 },
+  { id: 'nasr_city',     label: 'Nasr City',      x: 0.70, y: 0.38 },
+  { id: 'heliopolis',    label: 'Heliopolis',      x: 0.82, y: 0.22 },
+  { id: 'downtown',      label: 'Downtown',        x: 0.48, y: 0.50 },
+  { id: 'giza',          label: 'Giza',            x: 0.12, y: 0.45 },
+  { id: 'zamalek',       label: 'Zamalek',         x: 0.40, y: 0.35 },
+  { id: 'mohandessin',   label: 'Mohandessin',     x: 0.25, y: 0.30 },
+  { id: 'dokki',         label: 'Dokki',           x: 0.20, y: 0.55 },
+  { id: 'new_cairo',     label: 'New Cairo',       x: 0.90, y: 0.55 },
   { id: 'october',       label: '6th October',     x: 0.08, y: 0.15 },
-  { id: 'shoubra',       label: 'Shoubra',         x: 0.48, y: 0.14 },
-  { id: 'ain_shams',     label: 'Ain Shams',       x: 0.60, y: 0.18 },
+  { id: 'shoubra',       label: 'Shoubra',         x: 0.52, y: 0.12 },
+  { id: 'ain_shams',     label: 'Ain Shams',       x: 0.65, y: 0.18 },
 ];
 
-// Traffic data with morning/night peak values
 const cityEdges = [
   { from: 'downtown',    to: 'zamalek',      weight: 3,  morningPeak: 0.7, nightTraffic: 0.3 },
   { from: 'downtown',    to: 'nasr_city',     weight: 6,  morningPeak: 0.9, nightTraffic: 0.4 },
@@ -58,9 +58,14 @@ let currentPath = [];
 let pathAnimProgress = 0;
 let pathAnimId = null;
 let trafficParticles = [];
+let routeFlowParticles = [];
+let edgeCurves = new Map(); // Store THREE.CatmullRomCurve3 per edge
 let hoveredNode = null;
 let currentTimePeriod = 'night';
-let currentTrafficMode = 'normal'; // track for road state
+let currentTrafficMode = 'normal';
+
+// Padding for graph display
+const PAD = 40;
 
 // ── Init Dashboard ────────────────────────────
 export function initDashboard() {
@@ -72,13 +77,16 @@ export function initDashboard() {
   populateSelectors();
   bindEvents();
   startMapLoop();
+  generateCurves(); // Generate initial curves
   createTrafficParticles();
   updateEdgeTraffic();
 
-  window.addEventListener('resize', resizeMap);
+  window.addEventListener('resize', () => {
+    resizeMap();
+    generateCurves(); // Re-generate curves on resize
+  });
 }
 
-// ── Resize Map ────────────────────────────────
 function resizeMap() {
   if (!mapCanvas) return;
   const container = mapCanvas.parentElement;
@@ -86,7 +94,50 @@ function resizeMap() {
   mapCanvas.height = container.clientHeight - 48;
 }
 
-// ── Populate Selectors ────────────────────────
+// ── Node position helpers (with padding) ──────
+function nodeX(node, w) {
+  return PAD + node.x * (w - PAD * 2);
+}
+function nodeY(node, h) {
+  return PAD + node.y * (h - PAD * 2);
+}
+
+// ── Curve Generation — same logic for all ──────
+function generateCurves() {
+  if (!mapCanvas) return;
+  const w = mapCanvas.width, h = mapCanvas.height;
+  edgeCurves.clear();
+
+  cityEdges.forEach((edge, index) => {
+    const from = cityNodes.find((n) => n.id === edge.from);
+    const to = cityNodes.find((n) => n.id === edge.to);
+    if (!from || !to) return;
+
+    const x1 = nodeX(from, w), y1 = nodeY(from, h);
+    const x2 = nodeX(to, w), y2 = nodeY(to, h);
+
+    // Compute control point (mid-point + offset)
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const offset = len * 0.15;
+    const cpx = mx + (-dy / len) * offset;
+    const cpy = my + (dx / len) * offset;
+
+    // Use Three.js Catmull-Rom for consistent, smooth spline
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(x1, y1, 0),
+      new THREE.Vector3(cpx, cpy, 0),
+      new THREE.Vector3(x2, y2, 0)
+    ], false, 'catmullrom', 0.5);
+
+    // Store by unique ID (from_to) or index
+    edgeCurves.set(`${edge.from}_${edge.to}`, curve);
+  });
+}
+
 function populateSelectors() {
   const srcSelect = document.getElementById('source-select');
   const dstSelect = document.getElementById('dest-select');
@@ -96,12 +147,10 @@ function populateSelectors() {
     srcSelect.add(new Option(node.label, node.id));
     dstSelect.add(new Option(node.label, node.id));
   });
-
   srcSelect.value = 'maadi';
   dstSelect.value = 'heliopolis';
 }
 
-// ── Bind Events ───────────────────────────────
 function bindEvents() {
   const calcBtn = document.getElementById('calc-route-btn');
   if (calcBtn) calcBtn.addEventListener('click', calculateRoute);
@@ -110,11 +159,9 @@ function bindEvents() {
   if (timeSelect) {
     timeSelect.addEventListener('change', (e) => {
       currentTimePeriod = e.target.value;
-      // Set environment mode
       if (e.target.value === 'morning') setMode('morning');
       else if (e.target.value === 'afternoon') setMode('day');
       else setMode('night');
-
       updateEdgeTraffic();
       createTrafficParticles();
     });
@@ -126,14 +173,10 @@ function bindEvents() {
       currentTrafficMode = e.target.value;
       const isEmergency = e.target.value === 'emergency';
       setEmergencyMode(isEmergency);
-      if (!isEmergency) {
-        // Restore road to traffic-appropriate state
-        updateRoadFromTraffic();
-      }
+      if (!isEmergency) updateRoadFromTraffic();
     });
   }
 
-  // Day/night toggle buttons in header
   document.querySelectorAll('.mode-btn[data-mode]').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.mode-btn[data-mode]').forEach((b) => b.classList.remove('active'));
@@ -142,24 +185,23 @@ function bindEvents() {
     });
   });
 
-  // Map interactions
   if (mapCanvas) {
     mapCanvas.addEventListener('mousemove', onMapMouseMove);
     mapCanvas.addEventListener('click', onMapClick);
   }
 }
 
-// ── Map Mouse ─────────────────────────────────
 function onMapMouseMove(e) {
   const rect = mapCanvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
+  const w = mapCanvas.width, h = mapCanvas.height;
 
   hoveredNode = null;
   for (const node of cityNodes) {
-    const nx = node.x * mapCanvas.width;
-    const ny = node.y * mapCanvas.height;
-    if (Math.hypot(mx - nx, my - ny) < 22) {
+    const nx = nodeX(node, w);
+    const ny = nodeY(node, h);
+    if (Math.hypot(mx - nx, my - ny) < 28) {
       hoveredNode = node.id;
       mapCanvas.style.cursor = 'pointer';
       break;
@@ -172,7 +214,6 @@ function onMapClick() {
   if (!hoveredNode) return;
   const srcSelect = document.getElementById('source-select');
   const dstSelect = document.getElementById('dest-select');
-
   if (!srcSelect.value || srcSelect.value === '' || (srcSelect.value && dstSelect.value)) {
     srcSelect.value = hoveredNode;
     dstSelect.value = '';
@@ -181,25 +222,18 @@ function onMapClick() {
   }
 }
 
-// ── Update Edge Traffic Based on Time ─────────
 function updateEdgeTraffic() {
   cityEdges.forEach((edge) => {
-    if (currentTimePeriod === 'morning') {
-      edge.traffic = edge.morningPeak;
-    } else if (currentTimePeriod === 'night') {
-      edge.traffic = edge.nightTraffic;
-    } else {
-      // afternoon — average
-      edge.traffic = (edge.morningPeak + edge.nightTraffic) / 2;
-    }
+    if (currentTimePeriod === 'morning') edge.traffic = edge.morningPeak;
+    else if (currentTimePeriod === 'night') edge.traffic = edge.nightTraffic;
+    else edge.traffic = (edge.morningPeak + edge.nightTraffic) / 2;
   });
 }
 
-// ── Update Road State from Average Traffic ────
 function updateRoadFromTraffic() {
-  const avgTraffic = cityEdges.reduce((s, e) => s + (e.traffic || 0.3), 0) / cityEdges.length;
-  if (avgTraffic > 0.65) setRoadState('heavy');
-  else if (avgTraffic > 0.4) setRoadState('moderate');
+  const avg = cityEdges.reduce((s, e) => s + (e.traffic || 0.3), 0) / cityEdges.length;
+  if (avg > 0.65) setRoadState('heavy');
+  else if (avg > 0.4) setRoadState('moderate');
   else setRoadState('optimal');
 }
 
@@ -210,58 +244,37 @@ function dijkstra(sourceId, destId, mode) {
 
   cityEdges.forEach((e) => {
     let w = e.weight;
-    if (mode === 'emergency') {
-      w *= 0.5; // Emergency: aggressive shortcuts
-    } else {
-      w *= 1 + (e.traffic || 0.3); // Traffic-weighted
-    }
+    if (mode === 'emergency') w *= 0.5;
+    else w *= 1 + (e.traffic || 0.3);
     adj[e.from].push({ to: e.to, weight: w });
     adj[e.to].push({ to: e.from, weight: w });
   });
 
-  const dist = {};
-  const prev = {};
+  const dist = {}, prev = {};
   const visited = new Set();
-
-  cityNodes.forEach((n) => {
-    dist[n.id] = Infinity;
-    prev[n.id] = null;
-  });
+  cityNodes.forEach((n) => { dist[n.id] = Infinity; prev[n.id] = null; });
   dist[sourceId] = 0;
 
   while (true) {
-    let u = null;
-    let minD = Infinity;
+    let u = null, minD = Infinity;
     for (const nid of Object.keys(dist)) {
-      if (!visited.has(nid) && dist[nid] < minD) {
-        minD = dist[nid];
-        u = nid;
-      }
+      if (!visited.has(nid) && dist[nid] < minD) { minD = dist[nid]; u = nid; }
     }
     if (u === null || u === destId) break;
     visited.add(u);
-
     for (const edge of adj[u]) {
       const alt = dist[u] + edge.weight;
-      if (alt < dist[edge.to]) {
-        dist[edge.to] = alt;
-        prev[edge.to] = u;
-      }
+      if (alt < dist[edge.to]) { dist[edge.to] = alt; prev[edge.to] = u; }
     }
   }
 
   const path = [];
   let curr = destId;
-  while (curr) {
-    path.unshift(curr);
-    curr = prev[curr];
-  }
-
+  while (curr) { path.unshift(curr); curr = prev[curr]; }
   if (path[0] !== sourceId) return { path: [], distance: Infinity };
   return { path, distance: dist[destId] };
 }
 
-// ── Calculate Route ───────────────────────────
 function calculateRoute() {
   const source = document.getElementById('source-select')?.value;
   const dest = document.getElementById('dest-select')?.value;
@@ -273,29 +286,19 @@ function calculateRoute() {
   }
 
   const result = dijkstra(source, dest, mode);
-
-  if (result.path.length === 0) {
-    showNotification('No route found');
-    return;
-  }
+  if (result.path.length === 0) { showNotification('No route found'); return; }
 
   currentPath = result.path;
   currentTrafficMode = mode;
   displayResults(result, mode);
   animatePath();
-
-  // Update road visualization
-  if (mode !== 'emergency') {
-    updateRoadFromTraffic();
-  }
+  if (mode !== 'emergency') updateRoadFromTraffic();
 }
 
-// ── Display Results ───────────────────────────
 function displayResults(result, mode) {
   const totalTime = Math.round(result.distance * 2.5);
   const distKm = (result.distance * 1.8).toFixed(1);
-  const avgTraffic = result.path.length > 1
-    ? getPathTraffic(result.path) : 0;
+  const avgTraffic = result.path.length > 1 ? getPathTraffic(result.path) : 0;
   const trafficLevel = avgTraffic > 0.65 ? 'high' : avgTraffic > 0.4 ? 'medium' : 'low';
   const trafficLabels = { low: 'Low Traffic', medium: 'Moderate', high: 'Heavy' };
 
@@ -322,21 +325,12 @@ function displayResults(result, mode) {
       const node = cityNodes.find((n) => n.id === nodeId);
       const step = document.createElement('div');
       step.className = 'route-step';
-
       let dotClass = 'step-dot';
       if (i === 0) dotClass += ' start';
       else if (i === result.path.length - 1) dotClass += ' end';
-
-      step.innerHTML = `
-        <span class="${dotClass}"></span>
-        <span>${node ? node.label : nodeId}</span>
-      `;
+      step.innerHTML = `<span class="${dotClass}"></span><span>${node ? node.label : nodeId}</span>`;
       routeStepsEl.appendChild(step);
-
-      gsap.fromTo(step,
-        { opacity: 0, x: -20 },
-        { opacity: 1, x: 0, duration: 0.5, delay: i * 0.12, ease: 'power3.out' }
-      );
+      gsap.fromTo(step, { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.5, delay: i * 0.12, ease: 'power3.out' });
     });
   }
 
@@ -347,24 +341,20 @@ function displayResults(result, mode) {
   }
 }
 
-// Get average traffic for path edges
 function getPathTraffic(path) {
   let total = 0, count = 0;
   for (let i = 0; i < path.length - 1; i++) {
     const edge = cityEdges.find(e =>
-      (e.from === path[i] && e.to === path[i + 1]) ||
-      (e.to === path[i] && e.from === path[i + 1])
+      (e.from === path[i] && e.to === path[i + 1]) || (e.to === path[i] && e.from === path[i + 1])
     );
     if (edge) { total += edge.traffic || 0.3; count++; }
   }
   return count > 0 ? total / count : 0.3;
 }
 
-// ── Animate Value ─────────────────────────────
 function animateValue(el, start, end, duration, suffix = '') {
   const startTime = performance.now();
   const isFloat = !Number.isInteger(end);
-
   function step(currentTime) {
     const elapsed = currentTime - startTime;
     const progress = Math.min(elapsed / duration, 1);
@@ -376,30 +366,44 @@ function animateValue(el, start, end, duration, suffix = '') {
   requestAnimationFrame(step);
 }
 
-// ── Path Animation ────────────────────────────
 function animatePath() {
   pathAnimProgress = 0;
   if (pathAnimId) cancelAnimationFrame(pathAnimId);
-
   function tick() {
-    pathAnimProgress += 0.006;
+    pathAnimProgress += 0.008;
     if (pathAnimProgress > 1) pathAnimProgress = 1;
     if (pathAnimProgress < 1) pathAnimId = requestAnimationFrame(tick);
   }
   pathAnimId = requestAnimationFrame(tick);
+
+  // Create flowing route particles
+  createRouteFlowParticles();
 }
 
-// ── Traffic Particles ─────────────────────────
+function createRouteFlowParticles() {
+  routeFlowParticles = [];
+  if (currentPath.length < 2) return;
+  // Create 6 flowing dots at staggered positions
+  for (let i = 0; i < 6; i++) {
+    routeFlowParticles.push({
+      progress: i / 6,
+      speed: 0.003 + Math.random() * 0.001,
+      size: 3 + Math.random() * 2,
+      opacity: 0.6 + Math.random() * 0.4,
+    });
+  }
+}
+
 function createTrafficParticles() {
   trafficParticles = [];
   cityEdges.forEach((edge) => {
     const t = edge.traffic || 0.3;
-    const count = Math.floor(t * 5) + 1;
+    const count = Math.floor(t * 3) + 1;
     for (let i = 0; i < count; i++) {
       trafficParticles.push({
         edge,
         progress: Math.random(),
-        speed: 0.0008 + Math.random() * 0.002,
+        speed: 0.001 + Math.random() * 0.002,
         reverse: Math.random() > 0.5,
       });
     }
@@ -407,32 +411,29 @@ function createTrafficParticles() {
 }
 
 // ══════════════════════════════════════════════
-// MAP RENDER LOOP
+// MAP RENDER — IMPROVED
 // ══════════════════════════════════════════════
 function startMapLoop() {
   function draw() {
     requestAnimationFrame(draw);
     if (!mapCtx || !mapCanvas.width) return;
-
-    const w = mapCanvas.width;
-    const h = mapCanvas.height;
+    const w = mapCanvas.width, h = mapCanvas.height;
 
     mapCtx.clearRect(0, 0, w, h);
     drawGrid(w, h);
     drawEdges(w, h);
-    drawPath(w, h);
     drawTrafficParticles(w, h);
+    drawPath(w, h);
+    drawRouteFlow(w, h);
     drawNodes(w, h);
   }
   requestAnimationFrame(draw);
 }
 
-// ── Draw Grid ─────────────────────────────────
 function drawGrid(w, h) {
-  mapCtx.strokeStyle = 'rgba(0, 195, 255, 0.025)';
+  mapCtx.strokeStyle = 'rgba(0, 195, 255, 0.02)';
   mapCtx.lineWidth = 0.5;
-
-  const spacing = 35;
+  const spacing = 40;
   for (let x = 0; x < w; x += spacing) {
     mapCtx.beginPath(); mapCtx.moveTo(x, 0); mapCtx.lineTo(x, h); mapCtx.stroke();
   }
@@ -441,18 +442,14 @@ function drawGrid(w, h) {
   }
 }
 
-// ── Draw Edges — traffic colored ──────────────
+// ── EDGES — same smooth curves for background ──
 function drawEdges(w, h) {
   cityEdges.forEach((edge) => {
-    const from = cityNodes.find((n) => n.id === edge.from);
-    const to = cityNodes.find((n) => n.id === edge.to);
-    if (!from || !to) return;
+    const curve = edgeCurves.get(`${edge.from}_${edge.to}`);
+    if (!curve) return;
 
-    const x1 = from.x * w, y1 = from.y * h;
-    const x2 = to.x * w, y2 = to.y * h;
-
+    const points = curve.getPoints(100); // 100 segments for ultra-smoothness
     const t = edge.traffic || 0.3;
-    // Green → Yellow → Red
     let r, g, b;
     if (t < 0.5) {
       r = Math.round(t * 2 * 255);
@@ -464,17 +461,27 @@ function drawEdges(w, h) {
       b = 50;
     }
 
-    const alpha = 0.15 + t * 0.2;
+    // Outer glow
     mapCtx.beginPath();
-    mapCtx.moveTo(x1, y1);
-    mapCtx.lineTo(x2, y2);
-    mapCtx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-    mapCtx.lineWidth = 1.5 + t * 2.5;
+    mapCtx.moveTo(points[0].x, points[0].y);
+    points.forEach(p => mapCtx.lineTo(p.x, p.y));
+    mapCtx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${0.06 + t * 0.06})`;
+    mapCtx.lineWidth = 6 + t * 4;
+    mapCtx.lineCap = 'round';
+    mapCtx.stroke();
+
+    // Main edge
+    mapCtx.beginPath();
+    mapCtx.moveTo(points[0].x, points[0].y);
+    points.forEach(p => mapCtx.lineTo(p.x, p.y));
+    mapCtx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + t * 0.25})`;
+    mapCtx.lineWidth = 1.5 + t * 2;
+    mapCtx.lineCap = 'round';
     mapCtx.stroke();
   });
 }
 
-// ── Draw Path ─────────────────────────────────
+// ── PATH — same geometry as background edges ──
 function drawPath(w, h) {
   if (currentPath.length < 2) return;
 
@@ -482,66 +489,113 @@ function drawPath(w, h) {
   const pathColor = isEmergency ? '#ff3b3b' : '#00c3ff';
   const glowColor = isEmergency ? 'rgba(255,59,59,' : 'rgba(0,195,255,';
 
-  const points = currentPath.map((id) => {
-    const node = cityNodes.find((n) => n.id === id);
-    return { x: node.x * w, y: node.y * h };
-  });
-
-  const totalSegments = points.length - 1;
+  const totalSegments = currentPath.length - 1;
   const animSeg = pathAnimProgress * totalSegments;
 
   for (let i = 0; i < totalSegments; i++) {
     if (i > animSeg) break;
+    const fromId = currentPath[i];
+    const toId = currentPath[i + 1];
+    
+    // Attempt bidirectional lookup
+    let curve = edgeCurves.get(`${fromId}_${toId}`) || edgeCurves.get(`${toId}_${fromId}`);
+    if (!curve) continue;
 
+    const points = curve.getPoints(100);
     const segProgress = Math.min(1, animSeg - i);
-    const x1 = points[i].x, y1 = points[i].y;
-    const x2 = points[i].x + (points[i + 1].x - points[i].x) * segProgress;
-    const y2 = points[i].y + (points[i + 1].y - points[i].y) * segProgress;
+    const visibleCount = Math.floor(points.length * segProgress);
+    if (visibleCount < 2) continue;
 
-    // Outer glow
-    mapCtx.beginPath(); mapCtx.moveTo(x1, y1); mapCtx.lineTo(x2, y2);
-    mapCtx.strokeStyle = glowColor + '0.12)';
-    mapCtx.lineWidth = 14; mapCtx.lineCap = 'round'; mapCtx.stroke();
+    const visiblePoints = points.slice(0, visibleCount);
+
+    // Wide outer glow
+    mapCtx.beginPath();
+    mapCtx.moveTo(visiblePoints[0].x, visiblePoints[0].y);
+    visiblePoints.forEach(p => mapCtx.lineTo(p.x, p.y));
+    mapCtx.strokeStyle = glowColor + '0.06)';
+    mapCtx.lineWidth = 22; mapCtx.lineCap = 'round'; mapCtx.stroke();
 
     // Mid glow
-    mapCtx.beginPath(); mapCtx.moveTo(x1, y1); mapCtx.lineTo(x2, y2);
-    mapCtx.strokeStyle = glowColor + '0.35)';
-    mapCtx.lineWidth = 5; mapCtx.lineCap = 'round'; mapCtx.stroke();
+    mapCtx.beginPath();
+    mapCtx.moveTo(visiblePoints[0].x, visiblePoints[0].y);
+    visiblePoints.forEach(p => mapCtx.lineTo(p.x, p.y));
+    mapCtx.strokeStyle = glowColor + '0.2)';
+    mapCtx.lineWidth = 8; mapCtx.lineCap = 'round'; mapCtx.stroke();
 
-    // Core
-    mapCtx.beginPath(); mapCtx.moveTo(x1, y1); mapCtx.lineTo(x2, y2);
+    // Core line (thicker)
+    mapCtx.beginPath();
+    mapCtx.moveTo(visiblePoints[0].x, visiblePoints[0].y);
+    visiblePoints.forEach(p => mapCtx.lineTo(p.x, p.y));
     mapCtx.strokeStyle = pathColor;
-    mapCtx.lineWidth = 2.5; mapCtx.lineCap = 'round'; mapCtx.stroke();
-  }
-
-  // Moving vehicle dot
-  if (pathAnimProgress >= 1) {
-    const t = (performance.now() / 2500) % 1;
-    const seg = Math.floor(t * totalSegments);
-    const segT = (t * totalSegments) - seg;
-
-    if (seg < totalSegments) {
-      const px = points[seg].x + (points[seg + 1].x - points[seg].x) * segT;
-      const py = points[seg].y + (points[seg + 1].y - points[seg].y) * segT;
-
-      // Trail
-      mapCtx.beginPath();
-      mapCtx.arc(px, py, 12, 0, Math.PI * 2);
-      mapCtx.fillStyle = glowColor + '0.1)';
-      mapCtx.fill();
-
-      mapCtx.beginPath();
-      mapCtx.arc(px, py, 5, 0, Math.PI * 2);
-      mapCtx.fillStyle = pathColor;
-      mapCtx.shadowColor = pathColor;
-      mapCtx.shadowBlur = 15;
-      mapCtx.fill();
-      mapCtx.shadowBlur = 0;
-    }
+    mapCtx.lineWidth = 3; mapCtx.lineCap = 'round'; mapCtx.stroke();
   }
 }
 
-// ── Draw Traffic Particles ────────────────────
+// ── ROUTE FLOW — particles perfectly aligned with curves ──
+function drawRouteFlow(w, h) {
+  if (currentPath.length < 2 || pathAnimProgress < 1 || routeFlowParticles.length === 0) return;
+
+  const isEmergency = currentTrafficMode === 'emergency';
+  const dotColor = isEmergency ? '#ff3b3b' : '#00c3ff';
+  const glowColor = isEmergency ? 'rgba(255,59,59,' : 'rgba(0,195,255,';
+
+  const totalSegments = currentPath.length - 1;
+
+  routeFlowParticles.forEach((fp) => {
+    fp.progress += fp.speed;
+    if (fp.progress > 1) fp.progress -= 1;
+
+    const pathT = fp.progress * totalSegments;
+    const seg = Math.floor(pathT);
+    const segT = pathT - seg;
+
+    if (seg >= totalSegments) return;
+
+    const fromId = currentPath[seg];
+    const toId = currentPath[seg + 1];
+
+    // Follow the SAME curve geometry as the visual line
+    let curve = edgeCurves.get(`${fromId}_${toId}`) || edgeCurves.get(`${toId}_${fromId}`);
+    if (!curve) return;
+
+    // Correct direction if curve was stored backwards
+    const realSegT = edgeCurves.has(`${fromId}_${toId}`) ? segT : (1 - segT);
+    const p = curve.getPoint(realSegT);
+    const tangent = curve.getTangent(realSegT);
+
+    // Tail glow (directional stretch)
+    mapCtx.save();
+    mapCtx.translate(p.x, p.y);
+    mapCtx.rotate(Math.atan2(tangent.y, tangent.x));
+    
+    // Glow trail
+    mapCtx.beginPath();
+    mapCtx.ellipse(-fp.size * 2, 0, fp.size * 5, fp.size * 2, 0, 0, Math.PI * 2);
+    mapCtx.fillStyle = glowColor + (fp.opacity * 0.1).toFixed(3) + ')';
+    mapCtx.fill();
+
+    // Mid dot
+    mapCtx.beginPath();
+    mapCtx.arc(0, 0, fp.size * 1.5, 0, Math.PI * 2);
+    mapCtx.fillStyle = glowColor + (fp.opacity * 0.3).toFixed(3) + ')';
+    mapCtx.fill();
+
+    // Core dot
+    mapCtx.beginPath();
+    mapCtx.arc(0, 0, fp.size, 0, Math.PI * 2);
+    mapCtx.fillStyle = dotColor;
+    mapCtx.shadowColor = dotColor;
+    mapCtx.shadowBlur = 15;
+    mapCtx.globalAlpha = fp.opacity;
+    mapCtx.fill();
+    
+    mapCtx.restore();
+    mapCtx.shadowBlur = 0;
+    mapCtx.globalAlpha = 1;
+  });
+}
+
+// ── Traffic Particles ─────────────────────────
 function drawTrafficParticles(w, h) {
   trafficParticles.forEach((tp) => {
     tp.progress += tp.speed * (tp.reverse ? -1 : 1);
@@ -554,84 +608,83 @@ function drawTrafficParticles(w, h) {
     const to = cityNodes.find((n) => n.id === tp.edge.to);
     if (!from || !to) return;
 
-    const x = from.x * w + (to.x * w - from.x * w) * tp.progress;
-    const y = from.y * h + (to.y * h - from.y * h) * tp.progress;
+    const x = nodeX(from, w) + (nodeX(to, w) - nodeX(from, w)) * tp.progress;
+    const y = nodeY(from, h) + (nodeY(to, h) - nodeY(from, h)) * tp.progress;
 
     const t = tp.edge.traffic || 0.3;
     const color = t > 0.65
-      ? `rgba(255, 80, 50, ${0.3 + tp.progress * 0.3})`
+      ? `rgba(255, 80, 50, ${0.25 + tp.progress * 0.25})`
       : t > 0.4
-        ? `rgba(255, 200, 50, ${0.3 + tp.progress * 0.3})`
-        : `rgba(0, 255, 136, ${0.3 + tp.progress * 0.3})`;
+        ? `rgba(255, 200, 50, ${0.25 + tp.progress * 0.25})`
+        : `rgba(0, 255, 136, ${0.25 + tp.progress * 0.25})`;
 
     mapCtx.beginPath();
-    mapCtx.arc(x, y, 1.8, 0, Math.PI * 2);
+    mapCtx.arc(x, y, 2.2, 0, Math.PI * 2);
     mapCtx.fillStyle = color;
     mapCtx.fill();
   });
 }
 
-// ── Draw Nodes ────────────────────────────────
+// ── NODES — bigger, with halos + labels ───────
 function drawNodes(w, h) {
   cityNodes.forEach((node) => {
-    const x = node.x * w;
-    const y = node.y * h;
+    const x = nodeX(node, w);
+    const y = nodeY(node, h);
     const isActive = currentPath.includes(node.id);
     const isHovered = hoveredNode === node.id;
     const isStart = currentPath[0] === node.id;
     const isEnd = currentPath[currentPath.length - 1] === node.id;
 
-    // Pulse ring for active nodes
-    if (isActive || isHovered) {
-      const pulse = 0.5 + Math.sin(performance.now() * 0.003) * 0.3;
-      mapCtx.beginPath();
-      mapCtx.arc(x, y, 20, 0, Math.PI * 2);
-      mapCtx.fillStyle = isStart
-        ? `rgba(0, 255, 136, ${pulse * 0.08})`
-        : isEnd
-          ? `rgba(255, 59, 59, ${pulse * 0.08})`
-          : isActive
-            ? `rgba(0, 195, 255, ${pulse * 0.08})`
-            : `rgba(122, 0, 255, 0.06)`;
-      mapCtx.fill();
+    // Outer halo (always visible, subtle)
+    mapCtx.beginPath();
+    mapCtx.arc(x, y, 18, 0, Math.PI * 2);
+    if (isStart) mapCtx.fillStyle = 'rgba(0, 255, 136, 0.06)';
+    else if (isEnd) mapCtx.fillStyle = 'rgba(255, 59, 59, 0.06)';
+    else if (isActive) mapCtx.fillStyle = 'rgba(0, 195, 255, 0.06)';
+    else if (isHovered) mapCtx.fillStyle = 'rgba(122, 0, 255, 0.06)';
+    else mapCtx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+    mapCtx.fill();
 
+    // Pulse ring for active/hovered
+    if (isActive || isHovered) {
+      const pulse = 0.5 + Math.sin(performance.now() * 0.004) * 0.4;
       mapCtx.beginPath();
-      mapCtx.arc(x, y, 13, 0, Math.PI * 2);
-      mapCtx.strokeStyle = isStart
-        ? 'rgba(0, 255, 136, 0.3)'
-        : isEnd
-          ? 'rgba(255, 59, 59, 0.3)'
-          : 'rgba(0, 195, 255, 0.3)';
-      mapCtx.lineWidth = 1;
+      mapCtx.arc(x, y, 22 + pulse * 4, 0, Math.PI * 2);
+      mapCtx.strokeStyle = isStart ? `rgba(0, 255, 136, ${pulse * 0.15})`
+        : isEnd ? `rgba(255, 59, 59, ${pulse * 0.15})`
+        : `rgba(0, 195, 255, ${pulse * 0.15})`;
+      mapCtx.lineWidth = 1.5;
       mapCtx.stroke();
     }
 
-    // Node dot
+    // Node dot — BIGGER
+    const radius = isHovered ? 8 : isActive ? 7 : 5.5;
     mapCtx.beginPath();
-    mapCtx.arc(x, y, isHovered ? 7 : isActive ? 6 : 4.5, 0, Math.PI * 2);
+    mapCtx.arc(x, y, radius, 0, Math.PI * 2);
 
     if (isStart) {
       mapCtx.fillStyle = '#00ff88';
-      mapCtx.shadowColor = '#00ff88'; mapCtx.shadowBlur = 18;
+      mapCtx.shadowColor = '#00ff88'; mapCtx.shadowBlur = 22;
     } else if (isEnd) {
       mapCtx.fillStyle = '#ff3b3b';
-      mapCtx.shadowColor = '#ff3b3b'; mapCtx.shadowBlur = 18;
+      mapCtx.shadowColor = '#ff3b3b'; mapCtx.shadowBlur = 22;
     } else if (isActive) {
       mapCtx.fillStyle = '#00c3ff';
-      mapCtx.shadowColor = '#00c3ff'; mapCtx.shadowBlur = 15;
+      mapCtx.shadowColor = '#00c3ff'; mapCtx.shadowBlur = 18;
     } else {
-      mapCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      mapCtx.fillStyle = 'rgba(255, 255, 255, 0.55)';
       mapCtx.shadowBlur = 0;
     }
-
     mapCtx.fill();
     mapCtx.shadowBlur = 0;
 
-    // Label
-    mapCtx.font = '600 9px "Orbitron", monospace';
+    // Label — BIGGER, always visible, high contrast
+    mapCtx.font = '600 10px "Orbitron", monospace';
     mapCtx.textAlign = 'center';
-    mapCtx.fillStyle = isActive ? '#00c3ff' : isHovered ? '#ffffff' : 'rgba(224, 230, 240, 0.45)';
-    mapCtx.fillText(node.label, x, y - 16);
+    mapCtx.fillStyle = isActive ? '#00c3ff'
+      : isHovered ? '#ffffff'
+      : 'rgba(224, 230, 240, 0.55)';
+    mapCtx.fillText(node.label, x, y - 20);
   });
 }
 
@@ -651,16 +704,11 @@ function showNotification(msg) {
     `;
     document.body.appendChild(notif);
   }
-
   notif.textContent = msg;
   gsap.fromTo(notif,
     { opacity: 0, y: 20 },
-    {
-      opacity: 1, y: 0, duration: 0.5, ease: 'power3.out',
-      onComplete: () => {
-        gsap.to(notif, { opacity: 0, y: -10, delay: 2.5, duration: 0.4 });
-      },
-    }
+    { opacity: 1, y: 0, duration: 0.5, ease: 'power3.out',
+      onComplete: () => gsap.to(notif, { opacity: 0, y: -10, delay: 2.5, duration: 0.4 }) }
   );
 }
 
@@ -671,47 +719,16 @@ export function transitionToDashboard() {
   const intro = document.querySelector('.intro-sections');
   const dashboard = document.getElementById('dashboard');
   const threeCanvas = document.getElementById('three-canvas');
-
   if (!dashboard) return;
 
   const tl = gsap.timeline();
-
-  tl.to(intro, {
-    opacity: 0, y: -50, duration: 0.7, ease: 'power3.in',
-    onComplete: () => intro.classList.add('hidden'),
-  });
-
-  tl.to(threeCanvas, {
-    opacity: 0, duration: 0.6, ease: 'power2.out',
-  }, '-=0.4');
-
-  tl.call(() => {
-    dashboard.classList.add('active');
-    initDashboard();
-  });
-
-  tl.to(dashboard, {
-    opacity: 1, duration: 0.9, ease: 'power3.out',
-  });
-
-  tl.fromTo('.dash-header',
-    { y: -40, opacity: 0 },
-    { y: 0, opacity: 1, duration: 0.6, ease: 'power3.out' },
-    '-=0.4'
-  );
-
-  tl.fromTo('.dash-panel',
-    { y: 40, opacity: 0 },
-    { y: 0, opacity: 1, duration: 0.7, stagger: 0.15, ease: 'power3.out' },
-    '-=0.3'
-  );
-
-  tl.fromTo('.map-container',
-    { scale: 0.95, opacity: 0 },
-    { scale: 1, opacity: 1, duration: 0.6, ease: 'power3.out' },
-    '-=0.5'
-  );
-
+  tl.to(intro, { opacity: 0, y: -50, duration: 0.7, ease: 'power3.in', onComplete: () => intro.classList.add('hidden') });
+  tl.to(threeCanvas, { opacity: 0, duration: 0.6, ease: 'power2.out' }, '-=0.4');
+  tl.call(() => { dashboard.classList.add('active'); initDashboard(); });
+  tl.to(dashboard, { opacity: 1, duration: 0.9, ease: 'power3.out' });
+  tl.fromTo('.dash-header', { y: -40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: 'power3.out' }, '-=0.4');
+  tl.fromTo('.dash-panel', { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, stagger: 0.15, ease: 'power3.out' }, '-=0.3');
+  tl.fromTo('.map-container', { scale: 0.95, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.6, ease: 'power3.out' }, '-=0.5');
   return tl;
 }
 
@@ -719,21 +736,12 @@ export function transitionToIntro() {
   const intro = document.querySelector('.intro-sections');
   const dashboard = document.getElementById('dashboard');
   const threeCanvas = document.getElementById('three-canvas');
-
   const tl = gsap.timeline();
 
-  // Clean up emergency mode if active
   setEmergencyMode(false);
-
-  tl.to(dashboard, {
-    opacity: 0, duration: 0.6, ease: 'power3.in',
-    onComplete: () => dashboard.classList.remove('active'),
-  });
-
+  tl.to(dashboard, { opacity: 0, duration: 0.6, ease: 'power3.in', onComplete: () => dashboard.classList.remove('active') });
   tl.call(() => intro.classList.remove('hidden'));
-
   tl.to(intro, { opacity: 1, y: 0, duration: 0.7, ease: 'power3.out' });
   tl.to(threeCanvas, { opacity: 1, duration: 0.7, ease: 'power2.out' }, '-=0.5');
-
   return tl;
 }

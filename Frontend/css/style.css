@@ -209,6 +209,39 @@ img {
   color: var(--text-secondary);
 }
 
+/* Tap to initialize hint */
+.loading-tap-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-heading);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: var(--primary);
+  opacity: 0;
+  transform: translateY(10px);
+  margin-top: 16px;
+  cursor: pointer;
+  animation: tap-pulse 2s ease-in-out infinite;
+}
+
+.tap-icon {
+  font-size: 1.2rem;
+  animation: tap-icon-spin 4s linear infinite;
+}
+
+@keyframes tap-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; text-shadow: 0 0 20px var(--primary-glow); }
+}
+
+@keyframes tap-icon-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* ============================================================
    SECTIONS — CINEMATIC INTRO
    ============================================================ */
@@ -596,7 +629,7 @@ section {
   z-index: 100;
   display: none;
   opacity: 0;
-  background: var(--bg);
+  background: rgba(5, 5, 5, 0.85);
 }
 
 #dashboard.active {
@@ -1022,93 +1055,97 @@ body.day-mode {
    ============================================================ */
 
 body.morning-mode {
-  --bg: #0e0a08;
-  --bg-secondary: #140e0a;
-  --surface: rgba(255, 180, 80, 0.04);
-  --surface-hover: rgba(255, 180, 80, 0.07);
+  --bg: #0d0806;
+  --bg-secondary: #18100a;
+  --surface: rgba(255, 180, 80, 0.05);
+  --surface-hover: rgba(255, 180, 80, 0.08);
   --primary: #ffaa44;
   --primary-dim: rgba(255, 170, 68, 0.15);
-  --primary-glow: rgba(255, 170, 68, 0.35);
-  --glass-bg: rgba(20, 14, 10, 0.55);
-  --glass-border: rgba(255, 180, 80, 0.08);
-  --border-glow: rgba(255, 170, 68, 0.2);
+  --primary-glow: rgba(255, 170, 68, 0.4);
+  --text: #f0e0d0;
+  --text-secondary: rgba(240, 224, 208, 0.6);
+  --text-muted: rgba(240, 224, 208, 0.3);
+  --border: rgba(255, 180, 80, 0.06);
+  --glass-bg: rgba(20, 14, 8, 0.6);
+  --glass-border: rgba(255, 180, 80, 0.1);
+  --border-glow: rgba(255, 170, 68, 0.25);
 }
 
 /* ============================================================
-   EMERGENCY MODE — CINEMATIC DANGER
+   EMERGENCY MODE — CINEMATIC DANGER (NO LAYOUT BREAKING!)
    ============================================================ */
 
-body.emergency-mode {
-  animation: emergency-shake 0.4s ease-in-out infinite;
-}
+/*
+ * CRITICAL: We NEVER animate transform on body.
+ * Instead, we use a dedicated overlay element (#emergency-overlay)
+ * and only apply visual effects (box-shadow, filter, opacity)
+ * that don't affect layout.
+ */
 
-/* Subtle screen shake — controlled, not annoying */
-@keyframes emergency-shake {
-  0%, 100% { transform: translate(0, 0); }
-  10% { transform: translate(-1px, 0.5px); }
-  30% { transform: translate(1px, -0.5px); }
-  50% { transform: translate(-0.5px, 1px); }
-  70% { transform: translate(0.5px, -1px); }
-  90% { transform: translate(-1px, 0); }
-}
-
-/* Red pulsing overlay */
-body.emergency-mode::before {
-  content: '';
+/* Emergency overlay — injected by JS */
+#emergency-overlay {
   position: fixed;
+  inset: 0;
+  z-index: 9990;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+#emergency-overlay.active {
+  opacity: 1;
+}
+
+/* Red vignette */
+#emergency-overlay .em-vignette {
+  position: absolute;
   inset: 0;
   background: radial-gradient(
     ellipse at 50% 50%,
-    transparent 40%,
-    rgba(255, 59, 59, 0.06) 70%,
+    transparent 35%,
+    rgba(255, 59, 59, 0.05) 65%,
     rgba(255, 59, 59, 0.12) 100%
   );
-  z-index: 9990;
-  pointer-events: none;
-  animation: emergency-pulse 1.5s ease-in-out infinite;
+  animation: em-pulse 1.8s ease-in-out infinite;
 }
 
-@keyframes emergency-pulse {
-  0%, 100% { opacity: 0.6; }
+@keyframes em-pulse {
+  0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
 
-/* Pulsing red border glow on edges */
-body.emergency-mode::after {
-  content: '';
-  position: fixed;
+/* Red border glow */
+#emergency-overlay .em-border {
+  position: absolute;
   inset: 0;
-  border: 2px solid rgba(255, 59, 59, 0.15);
+  border: 1px solid rgba(255, 59, 59, 0.12);
   box-shadow:
-    inset 0 0 60px rgba(255, 59, 59, 0.06),
-    inset 0 0 120px rgba(255, 59, 59, 0.03);
-  z-index: 9991;
-  pointer-events: none;
-  animation: emergency-border-pulse 2s ease-in-out infinite;
-  border-radius: 0;
+    inset 0 0 80px rgba(255, 59, 59, 0.04),
+    inset 0 0 160px rgba(255, 59, 59, 0.02);
+  animation: em-border-pulse 2.5s ease-in-out infinite;
 }
 
-@keyframes emergency-border-pulse {
+@keyframes em-border-pulse {
   0%, 100% {
-    border-color: rgba(255, 59, 59, 0.1);
+    border-color: rgba(255, 59, 59, 0.08);
     box-shadow:
-      inset 0 0 60px rgba(255, 59, 59, 0.04),
-      inset 0 0 120px rgba(255, 59, 59, 0.02);
+      inset 0 0 80px rgba(255, 59, 59, 0.03),
+      inset 0 0 160px rgba(255, 59, 59, 0.01);
   }
   50% {
-    border-color: rgba(255, 59, 59, 0.25);
+    border-color: rgba(255, 59, 59, 0.2);
     box-shadow:
-      inset 0 0 80px rgba(255, 59, 59, 0.08),
-      inset 0 0 160px rgba(255, 59, 59, 0.04);
+      inset 0 0 100px rgba(255, 59, 59, 0.06),
+      inset 0 0 200px rgba(255, 59, 59, 0.03);
   }
 }
 
-/* Emergency contrast boost */
+/* Dashboard contrast boost in emergency (no layout impact) */
 body.emergency-mode #dashboard {
-  filter: contrast(1.05) saturate(1.1);
+  filter: contrast(1.03) saturate(1.08);
 }
 
-/* Emergency overrides for elements */
+/* Emergency UI element overrides */
 body.emergency-mode .dash-logo {
   color: var(--accent);
   text-shadow: 0 0 20px rgba(255, 59, 59, 0.4);
@@ -1118,17 +1155,16 @@ body.emergency-mode .status-badge.online {
   background: var(--accent-dim);
   color: var(--accent);
   border-color: rgba(255, 59, 59, 0.2);
-  animation: emergency-badge-pulse 1s ease-in-out infinite;
+  animation: em-badge-pulse 1.2s ease-in-out infinite;
 }
 
-@keyframes emergency-badge-pulse {
+@keyframes em-badge-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  50% { opacity: 0.5; }
 }
 
 /* Scanline becomes red in emergency */
 body.emergency-mode.scanline-effect::after {
-  background: linear-gradient(90deg, transparent, rgba(255, 59, 59, 0.3), transparent) !important;
-  animation: scanline 4s linear infinite !important;
+  background: linear-gradient(90deg, transparent, rgba(255, 59, 59, 0.25), transparent) !important;
 }
 
